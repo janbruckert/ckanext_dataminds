@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+
+recursive-include ckanext_dataminds/templates *
+recursive-include ckanext_dataminds/public *
