@@ -1,1 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Data Collection Settings</title>
+    <link rel="stylesheet" href="/public/css/dataminds.css" />
+    <style>
+      :root {
+        --bg-color: #f8f8f8;
+        --container-bg: #f5f5ff;
+        --card-bg: #fafafa;
+        --text-color: #000;
+        --button-bg: #007bff;
+        --button-text: #fff;
+        --btn-radius: 9.5px;
+      }
+      .dark {
+        --bg-color: #121212;
+        --container-bg: #1e1e1e;
+        --card-bg: #2a2a2a;
+        --text-color: #f5f5f5;
+        --button-bg: #007bff;
+        --button-text: #f5f5f5;
+      }
+      body {
+        font-family: 'Arial';
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        margin: 0;
+        padding: 0;
+        transition: background-color 0.3s, color 0.3s;
+      }
+      .container {
+        margin: 0 auto;
+        padding: 20px;
+        max-width: 1300px;
+        background-color: var(--container-bg);
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        transition: background-color 0.3s;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 20px;
+        position: relative;
+      }
+      .back-button a {
+        text-decoration: none;
+        background-color: var(--button-bg);
+        color: var(--button-text);
+        padding: 8px 12px;
+        border-radius: var(--btn-radius);
+      }
+      header h1 {
+        flex-grow: 1;
+        text-align: center;
+        margin: 0;
+      }
+      .theme-toggle {
+        position: absolute;
+        top: 0;
+        right: 0;
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        padding: 8px;
+        color: var(--button-text);
+        transition: color 0.3s;
+      }
+      .sources {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      section.source {
+        flex: 1;
+        border: 1px solid #ccc;
+        border-radius: 30px;
+        text-align: center;
+        background-color: var(--card-bg);
+        transition: background-color 0.3s;
+        padding: 20px;
+      }
+      .divider {
+        border-top: 2px solid #888;
+        margin: 30px 0;
+        margin-left: 30px;
+        margin-right: 30px;
+      }
+      .settings-form label {
+        display: block;
+        margin-top: 25px;
+        font-weight: bold;
+      }
+      .settings-form select,
+      .settings-form input[type="date"] {
+        width: 21.5%;
+        padding: 8px;
+        margin-top: 5px;
+        box-sizing: border-box;
+        border-radius: var(--btn-radius);
+        border: 1px solid #ccc;
+        margin-left: 50px;
+      }
+      .settings-form button {
+        width: 140px;
+        margin-top: 20px;
+        margin-left: 50px;
+        background-color: #28a745;
+        color: #fff;
+        border: none;
+        border-radius: var(--btn-radius);
+      }
+      .cron-links a {
+        display: inline-block;
+        margin: 20px;
+        padding: 8px 12px;
+        background-color: var(--button-bg);
+        color: var(--button-text);
+        text-decoration: none;
+        border-radius: var(--btn-radius);
+        transition: background-color 0.3s, color 0.3s;
+      }
+      .log-container {
+        border-radius: 30px;
+        background-color: var(--card-bg);
+        border: 1px solid #ccc;
+        padding: 10px;
+        max-height: 300px;
+        overflow-y: auto;
+        font-family: monospace;
+        margin-top: 20px;
+        transition: background-color 0.3s;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="back-button">
+          <a href="/ckan-admin/config">&laquo; Back</a>
+        </div>
+        <h1>Data Collection Settings</h1>
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle Dark Mode">🌙</button>
+      </header>
 
+      <div class="sources">
+        <!-- TED Settings -->
+        <section class="source">
+          <h2>TED</h2>
+          <!-- Settings Form -->
+          <form method="post" action="{{ url_for('dataminds.update_settings') }}" class="settings-form">
+            <input type="hidden" name="source" value="ted" />
+            <label>Collection Frequency
+              <select name="data_frequency" required>
+                <option value="hourly" {% if settings['ted']['frequency'] == 'hourly' %}selected{% endif %}>Hourly</option>
+                <option value="daily"  {% if settings['ted']['frequency'] == 'daily'  %}selected{% endif %}>Daily</option>
+                <option value="weekly"{% if settings['ted']['frequency'] == 'weekly' %}selected{% endif %}>Weekly</option>
+              </select>
+            </label>
+            <button type="submit">Save Settings</button>
+
+            <div class="divider"></div>
+
+            <label>Start Date of Publication
+              <input type="date" name="start_date" value="{{ settings['ted']['start_date'] }}" required />
+            </label>
+            <label>End Date for Publication
+              <input type="date" name="end_date" value="{{ settings['ted']['end_date'] }}" required />
+            </label>
+          </form>
+
+          <!-- Trigger Collection -->
+          <div class="cron-links">
+            <a href="{{ url_for('dataminds.trigger', source='ted', start_date=settings['ted']['start_date'], end_date=settings['ted']['end_date']) }}">
+              Start Collecting
+            </a>
+          </div>
+        </section>
+
+        <!-- BeschA Settings -->
+        <section class="source">
+          <h2>BeschA</h2>
+          <form method="post" action="{{ url_for('dataminds.update_settings') }}" class="settings-form">
+            <input type="hidden" name="source" value="bescha" />
+            <label>Collection Frequency
+              <select name="data_frequency" required>
+                <option value="hourly" {% if settings['bescha']['frequency'] == 'hourly' %}selected{% endif %}>Hourly</option>
+                <option value="daily"  {% if settings['bescha']['frequency'] == 'daily'  %}selected{% endif %}>Daily</option>
+                <option value="weekly"{% if settings['bescha']['frequency'] == 'weekly' %}selected{% endif %}>Weekly</option>
+              </select>
+            </label>
+            <button type="submit">Save Settings</button>
+
+            <div class="divider"></div>
+
+            <label>Start Date of Publication
+              <input type="date" name="start_date" value="{{ settings['bescha']['start_date'] }}" required />
+            </label>
+            <label>End Date for Publication
+              <input type="date" name="end_date" value="{{ settings['bescha']['end_date'] }}" required />
+            </label>
+          </form>
+
+          <div class="cron-links">
+            <a href="{{ url_for('dataminds.trigger', source='bescha', start_date=settings['bescha']['start_date'], end_date=settings['bescha']['end_date']) }}">
+              Start Collecting
+            </a>
+          </div>
+        </section>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Live-Log -->
+      <section>
+        <div class="log-container">
+          <h2>Log</h2>
+          <div class="divider" style="margin-left: 50px;"></div>
+          {% for line in log_lines %}
+            <div>{{ line }}</div>
+          {% endfor %}
+        </div>
+      </section>
+    </div>
+
+    <script>
+      (function() {
+        const toggleBtn = document.getElementById('theme-toggle');
+        const currentMode = localStorage.getItem('theme') || 'light';
+        if (currentMode === 'dark') document.body.classList.add('dark');
+        toggleBtn.textContent = document.body.classList.contains('dark') ? '☀️' : '🌙';
+
+        toggleBtn.addEventListener('click', () => {
+          document.body.classList.toggle('dark');
+          const isDark = document.body.classList.contains('dark');
+          localStorage.setItem('theme', isDark ? 'dark' : 'light');
+          toggleBtn.textContent = isDark ? '☀️' : '🌙';
+        });
+      })();
+    </script>
+  </body>
+</html>
