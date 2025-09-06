@@ -3,7 +3,7 @@ import json
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 import os
 import ckan.plugins.toolkit as tk
-from .cron_jobs import run_ted_cron_job, run_ted_cron_job_for, run_bescha_cron_job
+from .cron_jobs import run_ted_cron_job, run_ted_cron_job_for, run_bescha_cron_job_for
 
 # Define the blueprint with the template folder relative to this module
 dataminds_blueprint = Blueprint('dataminds', __name__, template_folder='templates/dataminds')
@@ -66,7 +66,7 @@ def trigger(source):
         run_ted_cron_job_for(start_date=start, end_date=end)
         flash(f"Ted-Cron gestartet für {start or 'Vortag'} … {end or ''}", "success")
     elif source == 'bescha':
-        run_bescha_cron_job()
+        run_bescha_cron_job_for(start_date=start, end_date=end)
         flash("BeschA-Cron gestartet.", "success")
     else:
         flash("Unbekannte Datenquelle.", "error")
