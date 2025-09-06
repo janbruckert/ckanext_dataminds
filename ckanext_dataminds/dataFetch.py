@@ -21,7 +21,7 @@ class DataFetcher:
         self.current_payload = {
             "query": "(title-proc='technology')",
             "fields": ["title-proc", "buyer-name", "publication-date", "publication-number"],
-            "limit": 80
+            "limit": 100
         }
         self.monitor_thread = threading.Thread(target=self.monitor_api_spec, daemon=True)
         self.monitor_thread.start()
@@ -64,64 +64,98 @@ class DataFetcher:
                         return None
 
             page_notices = data.get('notices', [])
-            print(f"[DEBUG] Fetched {len(page_notices)} notices in this page")
             all_notices.extend(page_notices)
 
             next_token = data.get('iterationNextToken')
-            print(f"[DEBUG] Next token: {next_token}")
             if not next_token:
                 total = len(all_notices)
                 print(f"[DEBUG] No more pages. Total notices collected: {total}")
                 return {'notices': all_notices, 'totalNoticeCount': total}
 
-    def fetch_bescha_data(self):
-        print("Fetching BeschA data... (dataFetch)")
-        try:
-            yesterday = datetime.now() - timedelta(days=1)
-            pub_day = yesterday.strftime("%Y-%m-%d")
-            parsed_url = urlparse(self.bescha_api_url)
-            qs = parse_qs(parsed_url.query)
-            qs.pop("pubMonth", None)
-            qs["pubDay"] = [pub_day]
-            qs["format"] = ["ocds.zip"]
-            new_query = urlencode(qs, doseq=True)
-            new_url = urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path,
-                                   parsed_url.params, new_query, parsed_url.fragment))
-            print(f"[INFO] Abgerufen wird URL: {new_url}")
+    def fetch_bescha_data(self, ):
+        """
+        Holt die tägliche BESCHA-OCIDS-ZIP, entpackt sie und sammelt alle 'releases'
+        aus den JSON-Dateien. Liefert ein Dict im TED-ähnlichen Format:
+        {'notices': [...], 'totalNoticeCount': n}
+        """
+        max_retries = 3
+        all_releases = []
+        if pub_day is None:
+            dt = datetime.now() - timedelta(days=1)
+        elif isinstance(pub_day, str):
+            dt = datetime.strptime(pub_day, "%Y-%m-%d")
+        else:
+            dt = pub_day
+        pub_day_str = dt.strftime("%Y-%m-%d")
 
-            r = requests.get(new_url, timeout=10)
-            r.raise_for_status()
+        # URL mit pubDay-Parameter bauen
+        parsed = urlparse(self.bescha_api_url)
+        qs = parse_qs(parsed.query)
+        qs['pubDay'] = [pub_day]
+        qs['format'] = ['ocds.zip']
+        new_query = urlencode(qs, doseq=True)
+        fetch_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path,
+                                parsed.params, new_query, parsed.fragment))
+        print(f"[DEBUG] Starting fetch_bescha_data for pubDay={pub_day}")
+        print(f"[DEBUG] Fetch URL: {fetch_url}")
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            bescha_folder = "/srv/app/ckanext_dataminds/BESCHA"
-            os.makedirs(bescha_folder, exist_ok=True)
+        # ZIP-Download mit Retries
+        for attempt in range(1, max_retries + 1):
+            try:
+                print(f"[DEBUG] Attempt {attempt}/{max_retries} to download BESCHA-ZIP")
+                r = requests.get(fetch_url, timeout=10)
+                print(f"[DEBUG] Received status_code={r.status_code}")
+                r.raise_for_status()
+                break
+            except requests.RequestException as e:
+                print(f"[ERROR] BESCHA-Request failed (Try {attempt}): {e}")
+                if attempt < max_retries:
+                    wait = 2 ** attempt
+                    print(f"[DEBUG] Waiting {wait}s before retry")
+                    time.sleep(wait)
+                else:
+                    print("[ERROR] Max retries reached, aborting fetch_bescha_data.")
+                    return None
 
-            tmp_zip = os.path.join(bescha_folder, f"bescha_data_{timestamp}.zip")
-            with open(tmp_zip, "wb") as f:
-                f.write(r.content)
-            print(f"[OK] BeschA-ZIP gespeichert: {tmp_zip}")
+        # In temporäres Verzeichnis speichern und entpacken
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = "/srv/app/ckanext_dataminds/BESCHA"
+        os.makedirs(base, exist_ok=True)
+        zip_path = os.path.join(base, f"bescha_{pub_day}_{timestamp}.zip")
+        with open(zip_path, "wb") as f:
+            f.write(r.content)
+        print(f"[OK] BeschA-ZIP gespeichert: {zip_path}")
 
-            tmp_folder = os.path.join(bescha_folder, f"bescha_unzip_{timestamp}")
-            os.makedirs(tmp_folder, exist_ok=True)
+        tmp_dir = os.path.join(base, f"unzipped_{pub_day}_{timestamp}")
+        os.makedirs(tmp_dir, exist_ok=True)
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(tmp_dir)
+        print(f"[OK] BeschA-ZIP entpackt nach: {tmp_dir}")
 
-            with zipfile.ZipFile(tmp_zip, "r") as zip_ref:
-                zip_ref.extractall(tmp_folder)
-            print(f"[OK] BeschA-ZIP entpackt in '{tmp_folder}'")
+        # JSON-Dateien einlesen und 'releases' sammeln
+        for root, _, files in os.walk(tmp_dir):
+            for fn in files:
+                if not fn.lower().endswith(".json"):
+                    continue
+                fp = os.path.join(root, fn)
+                try:
+                    with open(fp, 'r', encoding='utf-8') as jf:
+                        data = json.load(jf)
+                    releases = data.get('releases', [])
+                    if isinstance(releases, list):
+                        all_releases.extend(releases)
+                    else:
+                        print(f"[WARN] {fn}: 'releases' ist kein Array")
+                except Exception as e:
+                    print(f"[WARN] Fehler beim Parsen von {fn}: {e}")
 
-            json_files = []
-            for root, dirs, files in os.walk(tmp_folder):
-                for file in files:
-                    if file.lower().endswith(".json"):
-                        json_files.append(os.path.join(root, file))
-            os.remove(tmp_zip)
-            return json_files, tmp_folder
+        # Aufräumen
+        os.remove(zip_path)
+        # optional: shutil.rmtree(tmp_dir)
 
-        except requests.RequestException as e:
-            print(f"[FEHLER] BeschA-Request fehlgeschlagen: {e}")
-            return [], None
-        except zipfile.BadZipFile as e:
-            print(f"[FEHLER] Ungültige ZIP-Datei: {e}")
-            return [], None
+        total = len(all_releases)
+        print(f"[DEBUG] Total BESCHA releases collected: {total}")
+        return {'notices': all_releases, 'totalNoticeCount': total}
 
     def monitor_api_spec(self):
         while True:
