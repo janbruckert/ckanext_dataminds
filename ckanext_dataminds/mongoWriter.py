@@ -48,62 +48,59 @@ class MongoWriter:
             print(f"[FEHLER] JSON-Decoding Error: {e}")
 
 
-    def store_bescha_data(self, zip_file_paths):
+    def store_bescha_data(self, zip_paths):
         """
         Speichert JSON-Daten aus entpackten BeschA-ZIP-Dateien in die MongoDB-Collection 'bescha_data'.
         Für jeden ZIP-Dateipfad wird anhand des Dateinamens geprüft, ob er bereits verarbeitet wurde.
         """
-        if not zip_file_paths or not isinstance(zip_file_paths, list):
-            print("[WARN] No BeschA-ZIP-Data Paths available.")
-            return
+        if isinstance(zip_paths, str):
+            zip_paths = [zip_paths]
 
         docs_to_insert = []
-        for zip_path in zip_file_paths:
+        for zip_path in zip_paths:
+            source_file = os.path.basename(zip_path)
+
+            # Überspringen, falls schon importiert
+            if self.db["bescha_data"].find_one({"source_file": source_file}):
+                print(f"[INFO] {source_file} bereits verarbeitet, skip.")
+                continue
+
+            print(f"[INFO] Verarbeite ZIP: {source_file}…")
+
+            # ZIP entpacken und JSON-Dateien parsen
             try:
-                zip_filename = os.path.basename(zip_path)
-                existing = self.db["bescha_data"].find_one({"source_file": zip_filename})
-                if existing:
-                    print(f"[INFO] Datei {zip_filename} wurde bereits hochgeladen. Überspringe Verarbeitung.")
-                    continue
-
-                tmp_folder = zip_path.replace(".zip", "_unzipped")
-                os.makedirs(tmp_folder, exist_ok=True)
-
-                with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                    zip_ref.extractall(tmp_folder)
-
-                print(f"[OK] ZIP-Datei entpackt: {tmp_folder}")
-
-                for root, _, files in os.walk(tmp_folder):
-                    for file in files:
-                        if file.lower().endswith(".json"):
-                            json_path = os.path.join(root, file)
+                with zipfile.ZipFile(zip_path, "r") as archive:
+                    for member in archive.namelist():
+                        if not member.lower().endswith(".json"):
+                            continue
+                        with archive.open(member) as f:
                             try:
-                                with open(json_path, "r", encoding="utf-8") as f:
-                                    data = json.load(f)
-                                    if isinstance(data, list):
-                                        for doc in data:
-                                            doc["source_file"] = zip_filename
-                                        docs_to_insert.extend(data)
-                                    else:
-                                        data["source_file"] = zip_filename
-                                        docs_to_insert.append(data)
+                                data = json.load(f)
                             except json.JSONDecodeError as e:
-                                print(f"[WARN] JSON-Dekodierungsfehler in Datei {file}: {e}")
-                            except Exception as e:
-                                print(f"[WARN] Fehler beim Lesen der Datei {file}: {e}")
+                                print(f"[WARN] JSON-Fehler in {member}: {e}")
+                                continue
 
-                shutil.rmtree(tmp_folder, ignore_errors=True)
+                        # Unter 'releases' oder 'notices' abholen
+                        releases = data.get("releases") or data.get("notices") or []
+                        if isinstance(releases, dict):
+                            releases = [releases]
+
+                        for rel in releases:
+                            rel["source_file"] = source_file
+                            docs_to_insert.append(rel)
+
             except zipfile.BadZipFile as e:
-                print(f"[FEHLER] Ungültige ZIP-Datei: {zip_path}, Fehler: {e}")
+                print(f"[FEHLER] Ungültige ZIP-Datei {zip_path}: {e}")
             except Exception as e:
-                print(f"[FEHLER] Fehler beim Verarbeiten der ZIP-Datei {zip_path}: {e}")
+                print(f"[FEHLER] Fehler beim Verarbeiten von {zip_path}: {e}")
 
-        if docs_to_insert:
-            try:
-                result = self.db["bescha_data"].insert_many(docs_to_insert)
-                print(f"[OK] {len(result.inserted_ids)} BeschA-Dokumente erfolgreich eingefügt.")
-            except Exception as e:
-                print(f"[FEHLER] Fehler beim Einfügen in MongoDB: {e}")
-        else:
-            print("[WARN] Keine gültigen Dokumente gefunden.")
+        # Bulk-Insert in MongoDB
+        if not docs_to_insert:
+            print("[WARN] Keine BESCHA-Dokumente gefunden zum Einfügen.")
+            return
+
+        try:
+            result = self.db["bescha_data"].insert_many(docs_to_insert)
+            print(f"[OK] {len(result.inserted_ids)} BESCHA-Dokumente eingefügt (source_file zuletzt: {source_file}).")
+        except Exception as e:
+            print(f"[FEHLER] Beim Einfügen in MongoDB ist ein Fehler aufgetreten: {e}")
